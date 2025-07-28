@@ -1,0 +1,139 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name          String?
+  email         String    @unique
+  emailVerified DateTime? @map("email_verified")
+  image         String?
+  password      String?
+  profile       UserProfile @default(FREE)
+  accounts      Account[]
+  sessions      Session[]
+  connections   Connection[] @relation("UserConnections")
+  reports       Report[] @relation("UserReports")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  @@map("app_users")
+}
+
+model Account {
+  id                String  @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  userId            String  @map("user_id") @db.Uuid
+  type              String
+  provider          String
+  providerAccountId String  @map("provider_account_id")
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("app_accounts")
+}
+
+model Session {
+  id           String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id") @db.Uuid
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("app_sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+model Connection {
+  id          String @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  userId      String @map("user_id") @db.Uuid
+  platform    Platform
+  accountId   String @map("account_id")
+  accountName String @map("account_name")
+  accessToken String @map("access_token") @db.Text
+  refreshToken String? @map("refresh_token") @db.Text
+  expiresAt   DateTime? @map("expires_at")
+  isActive    Boolean @default(true) @map("is_active")
+  user        User @relation("UserConnections", fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([userId, platform, accountId])
+  @@map("api_connections")
+}
+
+model Report {
+  id          String @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  userId      String @map("user_id") @db.Uuid
+  name        String
+  description String?
+  config      Json
+  isActive    Boolean @default(true) @map("is_active")
+  lastRun     DateTime? @map("last_run")
+  nextRun     DateTime? @map("next_run")
+  user        User @relation("UserReports", fields: [userId], references: [id], onDelete: Cascade)
+  executions  ReportExecution[]
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("app_reports")
+}
+
+model ReportExecution {
+  id        String @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  reportId  String @map("report_id") @db.Uuid
+  status    ExecutionStatus
+  data      Json?
+  error     String?
+  startedAt DateTime @default(now()) @map("started_at")
+  endedAt   DateTime? @map("ended_at")
+  report    Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@map("report_executions")
+}
+
+enum UserProfile {
+  FREE
+  BASIC
+  PRO
+  ENTERPRISE
+
+  @@map("user_profile")
+}
+
+enum Platform {
+  FACEBOOK
+  GOOGLE
+  TIKTOK
+
+  @@map("platform")
+}
+
+enum ExecutionStatus {
+  PENDING
+  RUNNING
+  SUCCESS
+  FAILED
+
+  @@map("execution_status")
+}
