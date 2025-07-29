@@ -65,18 +65,19 @@ model VerificationToken {
 }
 
 model Connection {
-  id          String @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  userId      String @map("user_id") @db.Uuid
-  platform    Platform
-  accountId   String @map("account_id")
-  accountName String @map("account_name")
-  accessToken String @map("access_token") @db.Text
-  refreshToken String? @map("refresh_token") @db.Text
-  expiresAt   DateTime? @map("expires_at")
-  isActive    Boolean @default(true) @map("is_active")
-  user        User @relation("UserConnections", fields: [userId], references: [id], onDelete: Cascade)
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  id              String @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  userId          String @map("user_id") @db.Uuid
+  platform        Platform
+  accountId       String @map("account_id")
+  accountName     String @map("account_name")
+  accessToken     String @map("access_token") @db.Text
+  refreshToken    String? @map("refresh_token") @db.Text
+  developerToken  String? @map("developer_token") @db.Text // Para Google Ads API
+  expiresAt       DateTime? @map("expires_at")
+  isActive        Boolean @default(true) @map("is_active")
+  user            User @relation("UserConnections", fields: [userId], references: [id], onDelete: Cascade)
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
 
   @@unique([userId, platform, accountId])
   @@map("api_connections")

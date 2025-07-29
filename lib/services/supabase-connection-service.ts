@@ -87,7 +87,15 @@ export class SupabaseConnectionService {
       .single();
 
     if (existingConnection) {
-      throw new Error('Connection already exists for this account');
+      // Atualizar conexão existente em vez de criar nova
+      console.log('Connection exists, updating instead of creating new');
+      return await this.updateConnection(existingConnection.id, {
+        accountName: data.accountName,
+        accessToken: data.accessToken,
+        refreshToken: data.refreshToken,
+        expiresAt: data.expiresAt,
+        isActive: true
+      });
     }
 
     // Criptografar tokens antes de salvar
@@ -215,6 +223,54 @@ export class SupabaseConnectionService {
     }
   }
 
+  static async updateConnection(connectionId: string, data: {
+    accountName?: string;
+    accessToken?: string;
+    refreshToken?: string | null;
+    expiresAt?: Date | null;
+    isActive?: boolean;
+  }) {
+    const updateData: any = {
+      updated_at: new Date().toISOString()
+    };
+
+    if (data.accountName) updateData.account_name = data.accountName;
+    if (data.accessToken) updateData.access_token = this.encryptToken(data.accessToken);
+    if (data.refreshToken !== undefined) {
+      updateData.refresh_token = data.refreshToken ? this.encryptToken(data.refreshToken) : null;
+    }
+    if (data.expiresAt !== undefined) {
+      updateData.expires_at = data.expiresAt?.toISOString() || null;
+    }
+    if (data.isActive !== undefined) updateData.is_active = data.isActive;
+
+    const { data: connection, error } = await supabase
+      .from('api_connections')
+      .update(updateData)
+      .eq('id', connectionId)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error updating connection:', error);
+      throw new Error('Failed to update connection');
+    }
+
+    return {
+      id: connection.id,
+      userId: connection.user_id,
+      platform: connection.platform,
+      accountId: connection.account_id,
+      accountName: connection.account_name,
+      accessToken: this.decryptToken(connection.access_token),
+      refreshToken: connection.refresh_token ? this.decryptToken(connection.refresh_token) : null,
+      expiresAt: connection.expires_at ? new Date(connection.expires_at) : null,
+      isActive: connection.is_active,
+      createdAt: new Date(connection.created_at),
+      updatedAt: new Date(connection.updated_at)
+    };
+  }
+
   static async getConnectionLimits(userId: string) {
     const { data: user, error } = await supabase
       .from('app_users')
@@ -263,5 +319,39 @@ export class SupabaseConnectionService {
     }
 
     return new Date() < new Date(connection.expires_at);
+  }
+
+  static async getConnectionByAccount(userId: string, platform: Platform, accountId: string) {
+    const { data: connection, error } = await supabase
+      .from('api_connections')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('platform', platform)
+      .eq('account_id', accountId)
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') { // No rows found
+        return null;
+      }
+      console.error('Error fetching connection by account:', error);
+      throw new Error('Failed to fetch connection');
+    }
+
+    if (!connection) return null;
+
+    return {
+      id: connection.id,
+      userId: connection.user_id,
+      platform: connection.platform,
+      accountId: connection.account_id,
+      accountName: connection.account_name,
+      accessToken: this.decryptToken(connection.access_token),
+      refreshToken: connection.refresh_token ? this.decryptToken(connection.refresh_token) : null,
+      expiresAt: connection.expires_at ? new Date(connection.expires_at) : null,
+      isActive: connection.is_active,
+      createdAt: new Date(connection.created_at),
+      updatedAt: new Date(connection.updated_at)
+    };
   }
 }

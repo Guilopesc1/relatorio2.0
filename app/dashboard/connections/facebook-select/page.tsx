@@ -7,7 +7,10 @@ import {
   Facebook, 
   ArrowLeft,
   AlertTriangle,
-  Loader2
+  Loader2,
+  Search,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 
 interface FacebookAccount {
@@ -32,10 +35,16 @@ export default function FacebookSelectPage() {
 
   const [loading, setLoading] = useState(true);
   const [accounts, setAccounts] = useState<FacebookAccount[]>([]);
+  const [filteredAccounts, setFilteredAccounts] = useState<FacebookAccount[]>([]);
   const [selectedAccounts, setSelectedAccounts] = useState<string[]>([]);
   const [limits, setLimits] = useState<ConnectionLimits | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
+  
+  // Estados da paginação
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [searchTerm, setSearchTerm] = useState('');
 
   useEffect(() => {
     if (!token) {
@@ -46,6 +55,23 @@ export default function FacebookSelectPage() {
 
     fetchAccountsAndLimits();
   }, [token]);
+
+  // Efeito para filtrar contas baseado na busca
+  useEffect(() => {
+    const filtered = accounts.filter(account => 
+      account.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      account.id.includes(searchTerm) ||
+      (account.business_name && account.business_name.toLowerCase().includes(searchTerm.toLowerCase()))
+    );
+    setFilteredAccounts(filtered);
+    setCurrentPage(1); // Reset para primeira página ao filtrar
+  }, [accounts, searchTerm]);
+
+  // Calcular contas para página atual
+  const indexOfLastItem = currentPage * itemsPerPage;
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+  const currentAccounts = filteredAccounts.slice(indexOfFirstItem, indexOfLastItem);
+  const totalPages = Math.ceil(filteredAccounts.length / itemsPerPage);
 
   const fetchAccountsAndLimits = async () => {
     try {
@@ -112,6 +138,7 @@ export default function FacebookSelectPage() {
       );
 
       setAccounts(availableAccounts);
+      // filteredAccounts será atualizado pelo useEffect
       
       console.log('=== Fetching Facebook Accounts SUCCESS ===');
 
@@ -206,6 +233,39 @@ export default function FacebookSelectPage() {
     }
   };
 
+  // Funções de paginação
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+  };
+
+  const handleItemsPerPageChange = (newItemsPerPage: number) => {
+    setItemsPerPage(newItemsPerPage);
+    setCurrentPage(1);
+  };
+
+  const handleSelectAll = () => {
+    if (!limits) return;
+    
+    const currentPageAccountIds = currentAccounts.map(account => account.id);
+    const allCurrentSelected = currentPageAccountIds.every(id => selectedAccounts.includes(id));
+    
+    if (allCurrentSelected) {
+      // Desselecionar todos da página atual
+      setSelectedAccounts(prev => prev.filter(id => !currentPageAccountIds.includes(id)));
+    } else {
+      // Selecionar todos da página atual (respeitando limite)
+      const newSelections = currentPageAccountIds.filter(id => !selectedAccounts.includes(id));
+      const totalAfterSelection = selectedAccounts.length + newSelections.length;
+      
+      if (totalAfterSelection > limits.remaining) {
+        alert(`Você só pode conectar mais ${limits.remaining} contas com seu plano ${limits.profile}`);
+        return;
+      }
+      
+      setSelectedAccounts(prev => [...prev, ...newSelections]);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -288,30 +348,78 @@ export default function FacebookSelectPage() {
         {/* Lista de Contas */}
         <div className="bg-white rounded-lg shadow">
           <div className="px-6 py-4 border-b border-gray-200">
-            <h2 className="text-lg font-medium text-gray-900">
-              Contas Disponíveis ({accounts.length})
-            </h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-medium text-gray-900">
+                Contas Disponíveis ({filteredAccounts.length})
+              </h2>
+              <div className="flex items-center space-x-4">
+                {/* Busca */}
+                <div className="relative">
+                  <input
+                    type="text"
+                    placeholder="Buscar contas..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-64 pl-3 pr-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+                
+                {/* Itens por página */}
+                <select
+                  value={itemsPerPage}
+                  onChange={(e) => handleItemsPerPageChange(Number(e.target.value))}
+                  className="border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value={5}>5 por página</option>
+                  <option value={10}>10 por página</option>
+                  <option value={15}>15 por página</option>
+                </select>
+              </div>
+            </div>
+            
             {selectedAccounts.length > 0 && (
-              <p className="text-sm text-gray-600 mt-1">
-                {selectedAccounts.length} conta(s) selecionada(s)
-              </p>
+              <div className="flex items-center justify-between text-sm text-gray-600">
+                <p>{selectedAccounts.length} conta(s) selecionada(s)</p>
+                {currentAccounts.length > 0 && (
+                  <button
+                    onClick={handleSelectAll}
+                    className="text-blue-600 hover:text-blue-800 font-medium"
+                  >
+                    {currentAccounts.every(account => selectedAccounts.includes(account.id))
+                      ? 'Desselecionar todos desta página'
+                      : 'Selecionar todos desta página'
+                    }
+                  </button>
+                )}
+              </div>
             )}
           </div>
 
-          {accounts.length === 0 ? (
+          {filteredAccounts.length === 0 ? (
             <div className="px-6 py-8 text-center">
               <AlertTriangle className="h-12 w-12 text-gray-400 mx-auto mb-4" />
               <h3 className="text-lg font-medium text-gray-900 mb-2">
-                Nenhuma conta disponível
+                {searchTerm ? 'Nenhuma conta encontrada' : 'Nenhuma conta disponível'}
               </h3>
               <p className="text-gray-600">
-                Não encontramos contas de anúncios disponíveis para conectar.
-                Verifique se você tem acesso às contas no Facebook Business Manager.
+                {searchTerm 
+                  ? `Nenhuma conta corresponde à busca "${searchTerm}".`
+                  : 'Não encontramos contas de anúncios disponíveis para conectar. Verifique se você tem acesso às contas no Facebook Business Manager.'
+                }
               </p>
+              {searchTerm && (
+                <button
+                  onClick={() => setSearchTerm('')}
+                  className="mt-3 text-blue-600 hover:text-blue-800 font-medium"
+                >
+                  Limpar busca
+                </button>
+              )}
             </div>
           ) : (
-            <div className="divide-y divide-gray-200">
-              {accounts.map((account) => {
+            <>
+              <div className="divide-y divide-gray-200">
+                {currentAccounts.map((account) => {
                 const isSelected = selectedAccounts.includes(account.id);
                 
                 return (
@@ -362,11 +470,70 @@ export default function FacebookSelectPage() {
                   </div>
                 );
               })}
-            </div>
+                </div>
+                  
+              {/* Controles de Paginação */}
+              {totalPages > 1 && (
+                <div className="px-6 py-4 border-t border-gray-200 bg-gray-50">
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm text-gray-700">
+                      Mostrando {indexOfFirstItem + 1} a {Math.min(indexOfLastItem, filteredAccounts.length)} de {filteredAccounts.length} contas
+                    </div>
+                    
+                    <div className="flex items-center space-x-2">
+                      <button
+                        onClick={() => handlePageChange(currentPage - 1)}
+                        disabled={currentPage === 1}
+                        className="px-3 py-1 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Anterior
+                      </button>
+                      
+                      <div className="flex space-x-1">
+                        {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
+                          let pageNum;
+                          if (totalPages <= 5) {
+                            pageNum = i + 1;
+                          } else if (currentPage <= 3) {
+                            pageNum = i + 1;
+                          } else if (currentPage >= totalPages - 2) {
+                            pageNum = totalPages - 4 + i;
+                          } else {
+                            pageNum = currentPage - 2 + i;
+                          }
+                          
+                          return (
+                            <button
+                              key={pageNum}
+                              onClick={() => handlePageChange(pageNum)}
+                              className={`px-3 py-1 border rounded-md text-sm font-medium ${
+                                currentPage === pageNum
+                                  ? 'bg-blue-600 text-white border-blue-600'
+                                  : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                              }`}
+                            >
+                              {pageNum}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      
+                      <button
+                        onClick={() => handlePageChange(currentPage + 1)}
+                        disabled={currentPage === totalPages}
+                        className="px-3 py-1 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Próxima
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </>
           )}
 
           {/* Botões de Ação */}
-          {accounts.length > 0 && (
+          {filteredAccounts.length > 0 && (
             <div className="px-6 py-4 border-t border-gray-200 bg-gray-50">
               <div className="flex justify-between">
                 <button

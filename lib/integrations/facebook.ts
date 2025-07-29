@@ -70,7 +70,7 @@ export class FacebookAdsAPI {
     
     // Adicionar parâmetros à URL
     Object.keys(params).forEach(key => {
-      if (params[key] !== undefined && params[key] !== null) {
+      if (params[key] !== undefined && params[key] !== null) { 
         url.searchParams.append(key, params[key].toString());
       }
     });
@@ -98,18 +98,20 @@ export class FacebookAdsAPI {
     }
   }
 
-  async getAdAccounts(): Promise<FacebookAdAccount[]> {
-    try {
-      const response = await this.makeRequest('/me/adaccounts', {
-        fields: 'id,name,currency,account_status,business_name'
-      });
+async getAdAccounts(): Promise<FacebookAdAccount[]> {
+  let url = '/me/adaccounts';
+  const params = { fields: 'id,name,currency,account_status,business_name', limit: 500 };
+  const accounts: FacebookAdAccount[] = [];
 
-      return response.data || [];
-    } catch (error) {
-      console.error('Error fetching ad accounts:', error);
-      throw new Error('Failed to fetch Facebook ad accounts');
-    }
-  }
+  do {
+    const response = await this.makeRequest(url, params);
+    accounts.push(...(response.data || []));
+    url = response.paging?.next ? response.paging.next.replace(this.baseUrl, '') : '';
+  } while (url);
+
+  return accounts;
+}
+
 
   async getCampaigns(accountId: string): Promise<FacebookCampaign[]> {
     try {

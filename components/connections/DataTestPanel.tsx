@@ -31,6 +31,8 @@ export default function DataTestPanel({ connections }: DataTestPanelProps) {
   const [results, setResults] = useState<any>(null);
 
   const facebookConnections = connections.filter(conn => conn.platform === 'FACEBOOK');
+  const googleConnections = connections.filter(conn => conn.platform === 'GOOGLE');
+  const allActiveConnections = connections.filter(conn => conn.isActive);
 
   const handleConnectionToggle = (connectionId: string) => {
     setSelectedConnections(prev => 
@@ -50,35 +52,78 @@ export default function DataTestPanel({ connections }: DataTestPanelProps) {
     setResults(null);
 
     try {
-      if (selectedConnections.length === 1) {
-        // Teste individual
-        const response = await fetch('/api/integrations/facebook/data', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            connectionId: selectedConnections[0],
-            dateStart,
-            dateStop
-          }),
-        });
+      const results = [];
+      
+      for (const connectionId of selectedConnections) {
+        const connection = connections.find(c => c.id === connectionId);
+        if (!connection) continue;
 
-        const data = await response.json();
-        setResults(data);
-      } else {
-        // Teste múltiplas contas
-        const connectionIdsParam = selectedConnections.join(',');
-        const response = await fetch(
-          `/api/integrations/facebook/data?connectionIds=${connectionIdsParam}&dateStart=${dateStart}&dateStop=${dateStop}`
-        );
+        let apiEndpoint = '';
+        let dataType = 'account_overview';
+        
+        switch (connection.platform) {
+          case 'FACEBOOK':
+            apiEndpoint = '/api/integrations/facebook/data';
+            break;
+          case 'GOOGLE':
+            apiEndpoint = '/api/integrations/google/data';
+            break;
+          default:
+            continue;
+        }
 
-        const data = await response.json();
-        setResults(data);
+        try {
+          const response = await fetch(apiEndpoint, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              connectionId,
+              dataType,
+              dateStart,
+              dateStop
+            }),
+          });
+
+          const data = await response.json();
+          results.push({
+            connectionId,
+            platform: connection.platform,
+            accountName: connection.accountName,
+            success: data.success,
+            data: data.data,
+            error: data.error
+          });
+        } catch (error) {
+          results.push({
+            connectionId,
+            platform: connection.platform,
+            accountName: connection.accountName,
+            success: false,
+            error: `Erro de conexão: ${error}`
+          });
+        }
       }
+
+      setResults({
+        success: true,
+        data: {
+          summary: {
+            total: selectedConnections.length,
+            successful: results.filter(r => r.success).length,
+            failed: results.filter(r => !r.success).length
+          },
+          results,
+          collectedAt: new Date().toISOString()
+        }
+      });
     } catch (error) {
       console.error('Error testing data collection:', error);
-      alert('Erro ao testar coleta de dados');
+      setResults({
+        success: false,
+        error: 'Erro geral na coleta de dados'
+      });
     } finally {
       setLoading(false);
     }
@@ -90,7 +135,7 @@ export default function DataTestPanel({ connections }: DataTestPanelProps) {
     const dataStr = JSON.stringify(results, null, 2);
     const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
     
-    const exportFileDefaultName = `facebook_data_${dateStart}_to_${dateStop}.json`;
+    const exportFileDefaultName = `ads_data_${dateStart}_to_${dateStop}.json`;
     
     const linkElement = document.createElement('a');
     linkElement.setAttribute('href', dataUri);
@@ -104,10 +149,10 @@ export default function DataTestPanel({ connections }: DataTestPanelProps) {
         Teste de Coleta de Dados
       </h3>
 
-      {facebookConnections.length === 0 ? (
+      {allActiveConnections.length === 0 ? (
         <div className="text-center py-8">
           <p className="text-gray-500">
-            Nenhuma conexão Facebook disponível para teste
+            Nenhuma conexão ativa disponível para teste
           </p>
         </div>
       ) : (
@@ -115,25 +160,58 @@ export default function DataTestPanel({ connections }: DataTestPanelProps) {
           {/* Seleção de Conexões */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Selecionar Conexões Facebook
+              Selecionar Conexões
             </label>
-            <div className="space-y-2">
-              {facebookConnections.map((connection) => (
-                <label key={connection.id} className="flex items-center">
-                  <input
-                    type="checkbox"
-                    checked={selectedConnections.includes(connection.id)}
-                    onChange={() => handleConnectionToggle(connection.id)}
-                    className="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50"
-                  />
-                  <span className="ml-2 text-sm text-gray-900">
-                    {connection.accountName}
-                  </span>
-                  <span className="ml-1 text-xs text-gray-500">
-                    ({connection.accountId})
-                  </span>
-                </label>
-              ))}
+            <div className="space-y-3">
+              {/* Facebook Connections */}
+              {facebookConnections.length > 0 && (
+                <div>
+                  <h4 className="text-sm font-medium text-blue-700 mb-2">Facebook Ads</h4>
+                  <div className="space-y-2 ml-4">
+                    {facebookConnections.map((connection) => (
+                      <label key={connection.id} className="flex items-center">
+                        <input
+                          type="checkbox"
+                          checked={selectedConnections.includes(connection.id)}
+                          onChange={() => handleConnectionToggle(connection.id)}
+                          className="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-blue-200 focus:ring-opacity-50"
+                        />
+                        <span className="ml-2 text-sm text-gray-900">
+                          {connection.accountName}
+                        </span>
+                        <span className="ml-1 text-xs text-gray-500">
+                          ({connection.accountId})
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              {/* Google Connections */}
+              {googleConnections.length > 0 && (
+                <div>
+                  <h4 className="text-sm font-medium text-red-700 mb-2">Google Ads</h4>
+                  <div className="space-y-2 ml-4">
+                    {googleConnections.map((connection) => (
+                      <label key={connection.id} className="flex items-center">
+                        <input
+                          type="checkbox"
+                          checked={selectedConnections.includes(connection.id)}
+                          onChange={() => handleConnectionToggle(connection.id)}
+                          className="rounded border-gray-300 text-red-600 shadow-sm focus:border-red-300 focus:ring focus:ring-red-200 focus:ring-opacity-50"
+                        />
+                        <span className="ml-2 text-sm text-gray-900">
+                          {connection.accountName}
+                        </span>
+                        <span className="ml-1 text-xs text-gray-500">
+                          ({connection.accountId})
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 
@@ -226,34 +304,66 @@ export default function DataTestPanel({ connections }: DataTestPanelProps) {
                   </div>
 
                   {/* Métricas resumidas */}
-                  {results.data.campaigns && (
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                      <div className="bg-blue-50 p-3 rounded-lg">
-                        <div className="text-lg font-semibold text-blue-900">
-                          {results.data.campaigns.length}
-                        </div>
-                        <div className="text-sm text-blue-700">Campanhas</div>
-                      </div>
-                      <div className="bg-green-50 p-3 rounded-lg">
-                        <div className="text-lg font-semibold text-green-900">
-                          {results.data.campaigns.reduce((acc: number, camp: any) => acc + (camp.adSets?.length || 0), 0)}
-                        </div>
-                        <div className="text-sm text-green-700">Conjuntos de Anúncios</div>
-                      </div>
-                      <div className="bg-purple-50 p-3 rounded-lg">
-                        <div className="text-lg font-semibold text-purple-900">
-                          {results.data.campaigns.reduce((acc: number, camp: any) => 
-                            acc + (camp.adSets?.reduce((acc2: number, adSet: any) => acc2 + (adSet.ads?.length || 0), 0) || 0), 0
+                  {results.data.results && (
+                    <div className="space-y-4">
+                      {results.data.results.map((result: any, index: number) => (
+                        <div key={index} className="border border-gray-200 rounded-lg p-4">
+                          <div className="flex items-center justify-between mb-2">
+                            <h5 className="font-medium text-gray-900">
+                              {result.accountName} ({result.platform})
+                            </h5>
+                            <span className={`px-2 py-1 text-xs rounded-full ${
+                              result.success 
+                                ? 'bg-green-100 text-green-800' 
+                                : 'bg-red-100 text-red-800'
+                            }`}>
+                              {result.success ? 'Sucesso' : 'Erro'}
+                            </span>
+                          </div>
+                          
+                          {result.success ? (
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                              {result.platform === 'FACEBOOK' && result.data?.campaigns && (
+                                <>
+                                  <div className="bg-blue-50 p-2 rounded">
+                                    <div className="font-semibold text-blue-900">
+                                      {result.data.campaigns.length}
+                                    </div>
+                                    <div className="text-blue-700">Campanhas</div>
+                                  </div>
+                                  <div className="bg-green-50 p-2 rounded">
+                                    <div className="font-semibold text-green-900">
+                                      {result.data.totalSpend ? `${result.data.totalSpend.toFixed(2)}` : 'N/A'}
+                                    </div>
+                                    <div className="text-green-700">Gasto Total</div>
+                                  </div>
+                                </>
+                              )}
+                              
+                              {result.platform === 'GOOGLE' && result.data?.campaigns && (
+                                <>
+                                  <div className="bg-red-50 p-2 rounded">
+                                    <div className="font-semibold text-red-900">
+                                      {result.data.campaigns.length}
+                                    </div>
+                                    <div className="text-red-700">Campanhas</div>
+                                  </div>
+                                  <div className="bg-orange-50 p-2 rounded">
+                                    <div className="font-semibold text-orange-900">
+                                      {result.data.metrics?.totalSpend ? `${(result.data.metrics.totalSpend).toFixed(2)}` : 'N/A'}
+                                    </div>
+                                    <div className="text-orange-700">Gasto Total</div>
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="text-sm text-red-600">
+                              {result.error}
+                            </div>
                           )}
                         </div>
-                        <div className="text-sm text-purple-700">Anúncios</div>
-                      </div>
-                      <div className="bg-orange-50 p-3 rounded-lg">
-                        <div className="text-lg font-semibold text-orange-900">
-                          {new Date(results.data.collectedAt).toLocaleTimeString('pt-BR')}
-                        </div>
-                        <div className="text-sm text-orange-700">Coletado às</div>
-                      </div>
+                      ))}
                     </div>
                   )}
                 </div>

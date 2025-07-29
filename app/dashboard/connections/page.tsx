@@ -11,6 +11,7 @@ import {
   Smartphone
 } from 'lucide-react';
 import DataTestPanel from '@/components/connections/DataTestPanel';
+import GoogleConnectionModal from '@/components/connections/GoogleConnectionModal';
 
 interface Connection {
   id: string;
@@ -46,6 +47,8 @@ export default function ConnectionsPage() {
   const [limits, setLimits] = useState<ConnectionLimits | null>(null);
   const [loading, setLoading] = useState(true);
   const [oauthLoading, setOauthLoading] = useState(false);
+  const [showGoogleModal, setShowGoogleModal] = useState(false);
+  const [googleTokens, setGoogleTokens] = useState<{access_token: string, refresh_token: string} | null>(null);
 
   useEffect(() => {
     fetchConnections();
@@ -54,6 +57,9 @@ export default function ConnectionsPage() {
     const urlParams = new URLSearchParams(window.location.search);
     const success = urlParams.get('success');
     const error = urlParams.get('error');
+    const googleAuth = urlParams.get('google_auth');
+    const tokenReady = urlParams.get('token_ready');
+    const state = urlParams.get('state');
     
     if (success) {
       alert(success);
@@ -62,6 +68,13 @@ export default function ConnectionsPage() {
     }
     if (error) {
       alert(`Erro: ${error}`);
+      // Limpar a URL
+      window.history.replaceState({}, '', '/dashboard/connections');
+    }
+    if (googleAuth === 'success' && tokenReady === 'true' && state) {
+      // OAuth do Google foi bem-sucedido, recuperar tokens do cache
+      console.log('Google OAuth success detected, retrieving tokens from cache...');
+      retrieveGoogleTokens(state);
       // Limpar a URL
       window.history.replaceState({}, '', '/dashboard/connections');
     }
@@ -83,6 +96,37 @@ export default function ConnectionsPage() {
     }
   };
 
+  const retrieveGoogleTokens = async (state: string) => {
+    try {
+      console.log('Retrieving Google tokens from cache...');
+      
+      const response = await fetch('/api/integrations/google/tokens', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ state })
+      });
+
+      const data = await response.json();
+      
+      if (data.success) {
+        console.log('Tokens retrieved successfully from cache');
+        setGoogleTokens({ 
+          access_token: data.data.access_token, 
+          refresh_token: data.data.refresh_token 
+        });
+        setShowGoogleModal(true);
+      } else {
+        console.error('Failed to retrieve tokens:', data.error);
+        alert(`Erro ao recuperar tokens: ${data.error}`);
+      }
+    } catch (error) {
+      console.error('Error retrieving Google tokens:', error);
+      alert('Erro ao recuperar tokens do Google');
+    }
+  };
+
   const handleFacebookOAuth = async () => {
     setOauthLoading(true);
     try {
@@ -101,6 +145,20 @@ export default function ConnectionsPage() {
     } finally {
       setOauthLoading(false);
     }
+  };
+
+  const handleGoogleOAuth = async () => {
+    setOauthLoading(true);
+    console.log('Starting Google OAuth flow...');
+    
+    // REDIRECIONAR DIRETAMENTE para o endpoint OAuth
+    window.location.href = '/api/integrations/google/oauth';
+  };
+
+  const handleGoogleConnectionComplete = () => {
+    setShowGoogleModal(false);
+    setGoogleTokens(null);
+    fetchConnections();
   };
 
   const deleteConnection = async (connectionId: string) => {
@@ -172,20 +230,35 @@ export default function ConnectionsPage() {
         </div>
       )}
 
-      {/* Botão Adicionar Conexão */}
+      {/* Botões Adicionar Conexão */}
       <div className="mb-6">
-        <button
-          onClick={handleFacebookOAuth}
-          disabled={!canAddConnection || oauthLoading}
-          className={`inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${
-            canAddConnection && !oauthLoading
-              ? 'bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500' 
-              : 'bg-gray-400 cursor-not-allowed'
-          }`}
-        >
-          <Plus className="h-4 w-4 mr-2" />
-          {oauthLoading ? 'Conectando...' : 'Conectar Facebook Ads'}
-        </button>
+        <div className="flex flex-wrap gap-3">
+          <button
+            onClick={handleFacebookOAuth}
+            disabled={!canAddConnection || oauthLoading}
+            className={`inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${
+              canAddConnection && !oauthLoading
+                ? 'bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500' 
+                : 'bg-gray-400 cursor-not-allowed'
+            }`}
+          >
+            <Facebook className="h-4 w-4 mr-2" />
+            {oauthLoading ? 'Conectando...' : 'Conectar Facebook Ads'}
+          </button>
+          
+          <button
+            onClick={handleGoogleOAuth}
+            disabled={!canAddConnection}
+            className={`inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white ${
+              canAddConnection
+                ? 'bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500' 
+                : 'bg-gray-400 cursor-not-allowed'
+            }`}
+          >
+            <Chrome className="h-4 w-4 mr-2" />
+            Conectar Google Ads
+          </button>
+        </div>
         {!canAddConnection && (
           <p className="mt-2 text-sm text-red-600">
             Limite de conexões atingido para seu plano atual
@@ -271,6 +344,17 @@ export default function ConnectionsPage() {
         <div className="mt-8">
           <DataTestPanel connections={connections} />
         </div>
+      )}
+      
+      {/* Modal de Conexão Google */}
+      {showGoogleModal && googleTokens && (
+        <GoogleConnectionModal
+          isOpen={showGoogleModal}
+          onClose={() => setShowGoogleModal(false)}
+          accessToken={googleTokens.access_token}
+          refreshToken={googleTokens.refresh_token}
+          onSuccess={handleGoogleConnectionComplete}
+        />
       )}
     </div>
   );
