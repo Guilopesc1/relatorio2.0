@@ -253,7 +253,7 @@ export default function DashboardHome() {
             Ações Rápidas
           </h3>
           <div className="space-y-3">
-            <button className="w-full text-left p-3 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors">
+            <a href="/dashboard/connections" className="w-full text-left p-3 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors block">
               <div className="flex items-center">
                 <Users className="h-5 w-5 text-blue-600 mr-3" />
                 <div>
@@ -263,7 +263,18 @@ export default function DashboardHome() {
                   </p>
                 </div>
               </div>
-            </button>
+            </a>
+            <a href="/dashboard/facebook" className="w-full text-left p-3 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors block">
+              <div className="flex items-center">
+                <BarChart3 className="h-5 w-5 text-blue-600 mr-3" />
+                <div>
+                  <p className="font-medium text-gray-900">Facebook Dashboard</p>
+                  <p className="text-sm text-gray-500">
+                    Visualizar dados do Facebook Ads
+                  </p>
+                </div>
+              </div>
+            </a>
             <button className="w-full text-left p-3 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors">
               <div className="flex items-center">
                 <FileText className="h-5 w-5 text-green-600 mr-3" />

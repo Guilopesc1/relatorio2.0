@@ -29,6 +29,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const menuItems = [
     { name: 'Dashboard', href: '/dashboard', icon: Home },
     { name: 'Conexões', href: '/dashboard/connections', icon: LinkIcon },
+    { name: 'Facebook Ads', href: '/dashboard/facebook', icon: BarChart3 },
     { name: 'Relatórios', href: '/dashboard/reports', icon: FileText },
     { name: 'WhatsApp', href: '/dashboard/whatsapp', icon: MessageSquare },
     { name: 'Configurações', href: '/dashboard/settings', icon: Settings },

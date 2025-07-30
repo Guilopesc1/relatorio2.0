@@ -3,40 +3,43 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
 model User {
-  id            String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  name          String?
-  email         String    @unique
-  emailVerified DateTime? @map("email_verified")
-  image         String?
-  password      String?
-  profile       UserProfile @default(FREE)
-  accounts      Account[]
-  sessions      Session[]
-  connections   Connection[] @relation("UserConnections")
-  reports       Report[] @relation("UserReports")
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @updatedAt @map("updated_at")
+  id                        String    @id @default(cuid())
+  name                      String?
+  email                     String    @unique
+  emailVerified             DateTime? @map("email_verified")
+  image                     String?
+  password                  String?
+  profile                   String    @default("FREE") // FREE, BASIC, PRO, ENTERPRISE
+  accounts                  Account[]
+  sessions                  Session[]
+  connections               Connection[] @relation("UserConnections")
+  reports                   Report[] @relation("UserReports")
+  facebookAccounts          FacebookAccount[] @relation("UserFacebookAccounts")
+  facebookPreferences       UserFacebookMetricPreferences? @relation("UserFacebookPreferences")
+  facebookTemplates         FacebookReportTemplate[] @relation("UserFacebookTemplates")
+  createdAt                 DateTime  @default(now()) @map("created_at")
+  updatedAt                 DateTime  @updatedAt @map("updated_at")
 
   @@map("app_users")
 }
 
 model Account {
-  id                String  @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  userId            String  @map("user_id") @db.Uuid
+  id                String  @id @default(cuid())
+  userId            String  @map("user_id")
   type              String
   provider          String
   providerAccountId String  @map("provider_account_id")
-  refresh_token     String? @db.Text
-  access_token      String? @db.Text
+  refresh_token     String?
+  access_token      String?
   expires_at        Int?
   token_type        String?
   scope             String?
-  id_token          String? @db.Text
+  id_token          String?
   session_state     String?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -46,9 +49,9 @@ model Account {
 }
 
 model Session {
-  id           String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  id           String   @id @default(cuid())
   sessionToken String   @unique @map("session_token")
-  userId       String   @map("user_id") @db.Uuid
+  userId       String   @map("user_id")
   expires      DateTime
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -65,14 +68,14 @@ model VerificationToken {
 }
 
 model Connection {
-  id              String @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  userId          String @map("user_id") @db.Uuid
-  platform        Platform
+  id              String @id @default(cuid())
+  userId          String @map("user_id")
+  platform        String // FACEBOOK, GOOGLE, TIKTOK
   accountId       String @map("account_id")
   accountName     String @map("account_name")
-  accessToken     String @map("access_token") @db.Text
-  refreshToken    String? @map("refresh_token") @db.Text
-  developerToken  String? @map("developer_token") @db.Text // Para Google Ads API
+  accessToken     String @map("access_token")
+  refreshToken    String? @map("refresh_token")
+  developerToken  String? @map("developer_token") // Para Google Ads API
   expiresAt       DateTime? @map("expires_at")
   isActive        Boolean @default(true) @map("is_active")
   user            User @relation("UserConnections", fields: [userId], references: [id], onDelete: Cascade)
@@ -84,11 +87,11 @@ model Connection {
 }
 
 model Report {
-  id          String @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  userId      String @map("user_id") @db.Uuid
+  id          String @id @default(cuid())
+  userId      String @map("user_id")
   name        String
   description String?
-  config      Json
+  config      String // JSON como string no SQLite
   isActive    Boolean @default(true) @map("is_active")
   lastRun     DateTime? @map("last_run")
   nextRun     DateTime? @map("next_run")
@@ -101,10 +104,10 @@ model Report {
 }
 
 model ReportExecution {
-  id        String @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  reportId  String @map("report_id") @db.Uuid
-  status    ExecutionStatus
-  data      Json?
+  id        String @id @default(cuid())
+  reportId  String @map("report_id")
+  status    String // PENDING, RUNNING, SUCCESS, FAILED
+  data      String? // JSON como string no SQLite
   error     String?
   startedAt DateTime @default(now()) @map("started_at")
   endedAt   DateTime? @map("ended_at")
@@ -113,28 +116,254 @@ model ReportExecution {
   @@map("report_executions")
 }
 
-enum UserProfile {
-  FREE
-  BASIC
-  PRO
-  ENTERPRISE
+// ================================
+// FACEBOOK ADS CACHE SYSTEM MODELS (Simplificados para SQLite)
+// ================================
 
-  @@map("user_profile")
+model FacebookAccount {
+  id             String @id @default(cuid())
+  userId         String @map("user_id")
+  accountId      String @map("account_id")
+  accountName    String @map("account_name")
+  accessToken    String @map("access_token")
+  permissions    String // JSON array como string
+  status         String @default("ACTIVE") // ACTIVE, INACTIVE, EXPIRED, ERROR
+  lastSync       DateTime? @map("last_sync")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  
+  user           User @relation("UserFacebookAccounts", fields: [userId], references: [id], onDelete: Cascade)
+  campaignsCache FacebookCampaignCache[]  
+  adsetsCache    FacebookAdsetCache[]
+  adsCache       FacebookAdCache[]
+  metricsCache   FacebookMetricCache[]
+  detailedMetrics FacebookDetailedMetrics[]
+  invalidationLogs FacebookCacheInvalidationLog[]
+  
+  @@unique([userId, accountId])
+  @@map("facebook_accounts")
 }
 
-enum Platform {
-  FACEBOOK
-  GOOGLE
-  TIKTOK
-
-  @@map("platform")
+model FacebookCampaignCache {
+  id              String @id @default(cuid())
+  accountId       String @map("account_id")
+  campaignId      String @map("campaign_id")
+  campaignName    String @map("campaign_name")
+  status          String?
+  objective       String?
+  createdTime     DateTime? @map("created_time")
+  updatedTime     DateTime? @map("updated_time")
+  cacheCreatedAt  DateTime @default(now()) @map("cache_created_at")
+  cacheExpiresAt  DateTime @map("cache_expires_at")
+  isStale         Boolean @default(false) @map("is_stale")
+  
+  account         FacebookAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  
+  @@unique([accountId, campaignId])
+  @@map("facebook_campaigns_cache")
 }
 
-enum ExecutionStatus {
-  PENDING
-  RUNNING
-  SUCCESS
-  FAILED
+model FacebookAdsetCache {
+  id                String @id @default(cuid())
+  accountId         String @map("account_id")
+  campaignId        String @map("campaign_id")
+  adsetId           String @map("adset_id")
+  adsetName         String @map("adset_name")
+  status            String?
+  optimizationGoal  String? @map("optimization_goal")
+  billingEvent      String? @map("billing_event")
+  createdTime       DateTime? @map("created_time")
+  updatedTime       DateTime? @map("updated_time")
+  cacheCreatedAt    DateTime @default(now()) @map("cache_created_at")
+  cacheExpiresAt    DateTime @map("cache_expires_at")
+  isStale           Boolean @default(false) @map("is_stale")
+  
+  account           FacebookAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  
+  @@unique([accountId, adsetId])
+  @@map("facebook_adsets_cache")
+}
 
-  @@map("execution_status")
+model FacebookAdCache {
+  id              String @id @default(cuid())
+  accountId       String @map("account_id")
+  campaignId      String @map("campaign_id")
+  adsetId         String @map("adset_id")
+  adId            String @map("ad_id")
+  adName          String @map("ad_name")
+  status          String?
+  createdTime     DateTime? @map("created_time")
+  updatedTime     DateTime? @map("updated_time")
+  cacheCreatedAt  DateTime @default(now()) @map("cache_created_at")
+  cacheExpiresAt  DateTime @map("cache_expires_at")
+  isStale         Boolean @default(false) @map("is_stale")
+  
+  account         FacebookAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  
+  @@unique([accountId, adId])
+  @@map("facebook_ads_cache")
+}
+
+model FacebookMetricCache {
+  id                      String @id @default(cuid())
+  accountId               String @map("account_id")
+  objectType              String @map("object_type") // ACCOUNT, CAMPAIGN, ADSET, AD
+  objectId                String @map("object_id")
+  dateStart               DateTime @map("date_start")
+  dateStop                DateTime @map("date_stop")
+  
+  // Métricas principais (Float para decimais no SQLite)
+  impressions             Int?
+  clicks                  Int?
+  spend                   Float?
+  reach                   Int?
+  frequency               Float?
+  cpm                     Float?
+  cpc                     Float?
+  ctr                     Float?
+  cpp                     Float?
+  costPerUniqueClick      Float? @map("cost_per_unique_click")
+  
+  // Dados dinâmicos como JSON string
+  actions                 String? // JSON como string
+  conversions             String? // JSON como string
+  conversionValues        String? @map("conversion_values")
+  ageBreakdown            String? @map("age_breakdown")
+  genderBreakdown         String? @map("gender_breakdown")
+  devicePlatform          String? @map("device_platform")
+  additionalMetrics       String? @map("additional_metrics")
+  
+  // Metadados de cache
+  cacheCreatedAt          DateTime @default(now()) @map("cache_created_at")
+  cacheExpiresAt          DateTime @map("cache_expires_at")
+  cacheKey                String @map("cache_key")
+  isStale                 Boolean @default(false) @map("is_stale")
+  
+  account                 FacebookAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  
+  @@unique([accountId, cacheKey])
+  @@map("facebook_metrics_cache")
+}
+
+model UserFacebookMetricPreferences {
+  id                    String @id @default(cuid())
+  userId                String @map("user_id")
+  enabledMetrics        String @default("[]") @map("enabled_metrics") // JSON array como string
+  metricAliases         String @default("{}") @map("metric_aliases") // JSON como string
+  cacheDurationHours    Int @default(4) @map("cache_duration_hours")
+  autoRefresh           Boolean @default(true) @map("auto_refresh")
+  enabledBreakdowns     String @default("[]") @map("enabled_breakdowns") // JSON array como string
+  defaultDateRange      Int @default(7) @map("default_date_range")
+  defaultObjectLevel    String @default("CAMPAIGN") @map("default_object_level") // ACCOUNT, CAMPAIGN, ADSET, AD
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+  
+  user                  User @relation("UserFacebookPreferences", fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@unique([userId])
+  @@map("user_facebook_metric_preferences")
+}
+
+model FacebookReportTemplate {
+  id              String @id @default(cuid())
+  userId          String @map("user_id")
+  name            String
+  description     String?
+  isPublic        Boolean @default(false) @map("is_public")
+  templateConfig  String @map("template_config") // JSON como string
+  usageCount      Int @default(0) @map("usage_count")
+  lastUsed        DateTime? @map("last_used")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  
+  user            User @relation("UserFacebookTemplates", fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@map("facebook_report_templates")
+}
+
+model FacebookCacheInvalidationLog {
+  id                  String @id @default(cuid())
+  accountId           String @map("account_id")
+  invalidationType    String @map("invalidation_type")
+  invalidationScope   String @map("invalidation_scope")
+  objectIds           String @map("object_ids") // JSON array como string
+  reason              String?
+  triggeredBy         String? @map("triggered_by")
+  createdAt           DateTime @default(now()) @map("created_at")
+  
+  account             FacebookAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  
+  @@map("facebook_cache_invalidation_log")
+}
+
+// ================================
+// TABELA PARA MÉTRICAS DETALHADAS DO FACEBOOK
+// ================================
+model FacebookDetailedMetrics {
+  id                                        String @id @default(cuid())
+  accountId                                 String @map("account_id")
+  
+  // Identificadores da campanha/adset/ad
+  campaignName                              String? @map("campaign_name")
+  campaignId                                String? @map("campaign_id")
+  adSetId                                   String? @map("ad_set_id")
+  adSetName                                 String? @map("ad_set_name")
+  adId                                      String? @map("ad_id")
+  adName                                    String? @map("ad_name")
+  
+  // Período dos dados
+  dateStart                                 DateTime @map("date_start")
+  dateStop                                  DateTime? @map("date_stop")
+  
+  // Métricas básicas de alcance e impressões
+  reach                                     Int?
+  impressions                               Int?
+  
+  // Métricas de custo
+  spend                                     Float?
+  
+  // Métricas de cliques e tráfego
+  inlineLinkClicks                          Int? @map("inline_link_clicks")
+  linkClick                                 Int? @map("link_click")
+  
+  // Métricas de vídeo
+  videoView                                 Int? @map("video_view")
+  videoP75WatchedActions                    Int? @map("video_p75_watched_actions")
+  
+  // Métricas de conversão - Landing Page
+  landingPageView                           Int? @map("landing_page_view")
+  
+  // Métricas de conversão - E-commerce
+  offsiteConversionFbPixelAddToCart         Int? @map("offsite_conversion_fb_pixel_add_to_cart")
+  offsiteConversionFbPixelInitiateCheckout  Int? @map("offsite_conversion_fb_pixel_initiate_checkout")
+  offsiteConversionFbPixelPurchase          Int? @map("offsite_conversion_fb_pixel_purchase")
+  offsiteConversionFbPixelCompleteRegistration Int? @map("offsite_conversion_fb_pixel_complete_registration")
+  offsiteConversionFbPixelCustom            Int? @map("offsite_conversion_fb_pixel_custom")
+  
+  // Métricas de lead
+  offsiteConversionFbPixelLead              Int? @map("offsite_conversion_fb_pixel_lead")
+  onsiteConversionLeadGrouped               Int? @map("onsite_conversion_lead_grouped")
+  leadgenOther                              Int? @map("leadgen_other")
+  
+  // Métricas de messaging
+  onsiteConversionMessagingConversationStarted7d Int? @map("onsite_conversion_messaging_conversation_started_7d")
+  
+  // Metadados de cache e controle
+  cacheCreatedAt                            DateTime @default(now()) @map("cache_created_at")
+  cacheExpiresAt                            DateTime @map("cache_expires_at")
+  cacheKey                                  String @map("cache_key")
+  isStale                                   Boolean @default(false) @map("is_stale")
+  
+  // Dados adicionais como JSON (para métricas não estruturadas)
+  additionalData                            String? @map("additional_data") // JSON como string
+  
+  // Relacionamento com a conta do Facebook
+  account                                   FacebookAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  
+  @@unique([accountId, cacheKey])
+  @@index([campaignId, dateStart])
+  @@index([adSetId, dateStart])
+  @@index([adId, dateStart])
+  @@index([dateStart, dateStop])
+  @@map("facebook_detailed_metrics")
 }

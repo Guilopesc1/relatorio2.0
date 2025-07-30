@@ -1,6 +1,12 @@
 @echo off
-echo Instalando dependencias do projeto...
 cd /d "C:\Users\Gui\MCP_Servers\Relatorio_Otimizado"
+
+REM Adicionar Node.js ao PATH temporariamente
+set PATH=%PATH%;C:\Program Files\nodejs
+
+echo Verificando Node.js...
+node --version
+npm --version
 
 echo Limpando cache...
 if exist node_modules rmdir /s /q node_modules

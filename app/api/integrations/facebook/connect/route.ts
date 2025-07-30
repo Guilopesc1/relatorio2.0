@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '../../../auth/[...nextauth]/route';
 import { FacebookAdsAPI } from '@/lib/integrations/facebook';
-import { SupabaseConnectionService } from '@/lib/services/supabase-connection-service';
+import { PrismaConnectionService } from '@/lib/services/prisma-connection-service';
+import { prisma } from '@/lib/prisma';
 
 export async function POST(request: NextRequest) {
   try {
@@ -39,16 +40,16 @@ export async function POST(request: NextRequest) {
     }
 
     // Verificar se pode adicionar nova conexão
-    const canAdd = await SupabaseConnectionService.canAddConnection(session.user.id, 'FACEBOOK');
+    const canAdd = await PrismaConnectionService.canAddConnection(session.user.id, 'FACEBOOK');
     if (!canAdd) {
-      const limits = await SupabaseConnectionService.getConnectionLimits(session.user.id);
+      const limits = await PrismaConnectionService.getConnectionLimits(session.user.id);
       return NextResponse.json({
         error: `Maximum connections reached for your ${limits.profile} plan. Limit: ${limits.max}`
       }, { status: 400 });
     }
 
     // Criar conexão
-    const connection = await SupabaseConnectionService.createConnection({
+    const connection = await PrismaConnectionService.createConnection({
       userId: session.user.id,
       platform: 'FACEBOOK',
       accountId: account.id,

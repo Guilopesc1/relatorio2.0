@@ -1,81 +1,97 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { prisma } from '@/lib/prisma';
 
 export async function GET(request: NextRequest) {
   try {
-    console.log('=== SUPABASE CONNECTION TEST ===');
+    console.log('=== PRISMA CONNECTION TEST ===');
     
-    // Verificar variáveis de ambiente
-    const supabaseUrl = process.env.SUPABASE_URL;
-    const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
-    
-    console.log('SUPABASE_URL:', supabaseUrl ? 'SET' : 'NOT SET');
-    console.log('SUPABASE_SERVICE_KEY:', supabaseKey ? 'SET' : 'NOT SET');
-    
-    if (!supabaseUrl || !supabaseKey) {
-      return NextResponse.json({
-        error: 'Missing Supabase configuration',
-        details: 'SUPABASE_URL or SUPABASE_SERVICE_KEY not configured'
-      }, { status: 500 });
-    }
-    
-    // Criar cliente Supabase
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    // Verificar conexão com banco
+    console.log('Testing database connection...');
     
     // Testar conexão básica
-    console.log('Testing basic connection...');
-    const { data: testData, error: testError } = await supabase
-      .from('app_users')
-      .select('id, email')
-      .limit(1);
+    const userCount = await prisma.user.count();
+    console.log('✅ Database connection successful!');
     
-    if (testError) {
-      console.error('Supabase connection test failed:', testError);
-      return NextResponse.json({
-        error: 'Supabase connection failed',
-        details: testError.message
-      }, { status: 500 });
+    // Testar diferentes tabelas
+    const connectionCount = await prisma.connection.count();
+    const reportCount = await prisma.report.count();
+    
+    console.log(`Found ${userCount} users, ${connectionCount} connections, ${reportCount} reports`);
+    
+    // Buscar dados de exemplo
+    const [recentUsers, recentConnections] = await Promise.all([
+      prisma.user.findMany({
+        select: {
+          id: true,
+          email: true,
+          profile: true,
+          createdAt: true
+        },
+        take: 3,
+        orderBy: { createdAt: 'desc' }
+      }),
+      prisma.connection.findMany({
+        select: {
+          id: true,
+          platform: true,
+          accountName: true,
+          isActive: true,
+          createdAt: true
+        },
+        take: 3,
+        orderBy: { createdAt: 'desc' }
+      })
+    ]);
+    
+    // Teste das tabelas Facebook se existirem
+    let facebookStats = null;
+    try {
+      const facebookAccountCount = await prisma.facebookAccount.count();
+      const facebookCampaignCount = await prisma.facebookCampaignCache.count();
+      facebookStats = {
+        accounts: facebookAccountCount,
+        campaignsCache: facebookCampaignCount
+      };
+      console.log('✅ Facebook tables accessible!');
+    } catch (error) {
+      console.log('ℹ️ Facebook tables not yet populated');
     }
     
-    console.log('✅ Supabase connection successful!');
-    
-    // Testar tabela de conexões
-    console.log('Testing api_connections table...');
-    const { data: connectionsData, error: connectionsError } = await supabase
-      .from('api_connections')
-      .select('id, platform, account_name')
-      .limit(5);
-    
-    if (connectionsError) {
-      console.error('api_connections table test failed:', connectionsError);
-      return NextResponse.json({
-        error: 'api_connections table access failed',
-        details: connectionsError.message
-      }, { status: 500 });
-    }
-    
-    console.log('✅ api_connections table accessible!');
+    console.log('✅ All Prisma tests successful!');
     
     return NextResponse.json({
       success: true,
-      message: 'Supabase connection test successful',
-      data: {
-        users_found: testData?.length || 0,
-        connections_found: connectionsData?.length || 0,
-        sample_connections: connectionsData?.map(conn => ({
-          id: conn.id,
+      message: 'Prisma connection test successful',
+      stats: {
+        users: userCount,
+        connections: connectionCount,
+        reports: reportCount,
+        facebook: facebookStats
+      },
+      samples: {
+        recentUsers: recentUsers.map(user => ({
+          id: user.id.substring(0, 8) + '...',
+          email: user.email,
+          profile: user.profile,
+          createdAt: user.createdAt
+        })),
+        recentConnections: recentConnections.map(conn => ({
+          id: conn.id.substring(0, 8) + '...',
           platform: conn.platform,
-          account_name: conn.account_name
-        })) || []
+          accountName: conn.accountName,
+          isActive: conn.isActive,
+          createdAt: conn.createdAt
+        }))
       }
     });
     
   } catch (error) {
-    console.error('Supabase test error:', error);
+    console.error('Prisma test error:', error);
     
     return NextResponse.json({
-      error: 'Supabase test failed',  
-      details: error instanceof Error ? error.message : 'Unknown error'
+      error: 'Prisma test failed',  
+      details: error instanceof Error ? error.message : 'Unknown error',
+      message: 'Check if database is accessible and schema is applied'
     }, { status: 500 });
   }
 }

@@ -1,12 +1,6 @@
-import { createClient } from '@supabase/supabase-js';
-import { Platform, UserProfile } from '@prisma/client';
+import { prisma } from './lib/prisma'
+import { Platform, UserProfile } from '@prisma/client'
 
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_KEY!
-);
-
-// Limites por perfil de usuário
 const CONNECTION_LIMITS = {
   FREE: 1,
   BASIC: 3,
@@ -14,46 +8,33 @@ const CONNECTION_LIMITS = {
   ENTERPRISE: 50
 } as const;
 
-export class SupabaseConnectionService {
-  
+export class PrismaConnectionService {
+  // 1. Conta quantas conexões o usuário tem
   static async getUserConnectionCount(userId: string, platform?: Platform): Promise<number> {
-    let query = supabase
-      .from('api_connections')
-      .select('*', { count: 'exact', head: true })
-      .eq('user_id', userId)
-      .eq('is_active', true);
-    
-    if (platform) {
-      query = query.eq('platform', platform);
-    }
-
-    const { count, error } = await query;
-
-    if (error) {
-      console.error('Error counting connections:', error);
-      throw new Error('Failed to count connections');
-    }
-
-    return count || 0;
+    return prisma.api_connections.count({
+      where: {
+        user_id: userId,
+        is_active: true,
+        ...(platform && { platform }),
+      },
+    });
   }
 
+  // 2. Checa se pode adicionar nova conexão
   static async canAddConnection(userId: string, platform: Platform): Promise<boolean> {
-    const { data: user, error } = await supabase
-      .from('app_users')
-      .select('profile')
-      .eq('id', userId)
-      .single();
+    const user = await prisma.app_users.findUnique({
+      where: { id: userId },
+      select: { profile: true },
+    });
 
-    if (error || !user) {
-      throw new Error('User not found');
-    }
+    if (!user) throw new Error('User not found');
 
     const currentCount = await this.getUserConnectionCount(userId, platform);
     const maxConnections = CONNECTION_LIMITS[user.profile as UserProfile];
-
     return currentCount < maxConnections;
   }
 
+  // 3. Cria nova conexão (ou atualiza se já existir)
   static async createConnection(data: {
     userId: string;
     platform: Platform;
@@ -63,102 +44,79 @@ export class SupabaseConnectionService {
     refreshToken?: string | null;
     expiresAt?: Date | null;
   }) {
-    
-    // Verificar se pode adicionar nova conexão
+    // Verifica se pode adicionar nova
     const canAdd = await this.canAddConnection(data.userId, data.platform);
     if (!canAdd) {
-      const { data: user } = await supabase
-        .from('app_users')
-        .select('profile')
-        .eq('id', data.userId)
-        .single();
-      
+      const user = await prisma.app_users.findUnique({
+        where: { id: data.userId },
+        select: { profile: true },
+      });
       const profile = user?.profile as UserProfile || 'FREE';
       throw new Error(`Maximum connections reached for ${profile} plan. Limit: ${CONNECTION_LIMITS[profile]}`);
     }
 
-    // Verificar se já existe conexão para esta conta
-    const { data: existingConnection } = await supabase
-      .from('api_connections')
-      .select('id')
-      .eq('user_id', data.userId)
-      .eq('platform', data.platform)
-      .eq('account_id', data.accountId)
-      .single();
+    // Verifica se já existe
+    const existingConnection = await prisma.api_connections.findFirst({
+      where: {
+        user_id: data.userId,
+        platform: data.platform,
+        account_id: data.accountId,
+      },
+    });
 
     if (existingConnection) {
-      // Atualizar conexão existente em vez de criar nova
-      console.log('Connection exists, updating instead of creating new');
       return await this.updateConnection(existingConnection.id, {
         accountName: data.accountName,
         accessToken: data.accessToken,
         refreshToken: data.refreshToken,
         expiresAt: data.expiresAt,
-        isActive: true
+        isActive: true,
       });
     }
 
-    // Criptografar tokens antes de salvar
-    const encryptedData = {
-      user_id: data.userId,
-      platform: data.platform,
-      account_id: data.accountId,
-      account_name: data.accountName,
-      access_token: this.encryptToken(data.accessToken),
-      refresh_token: data.refreshToken ? this.encryptToken(data.refreshToken) : null,
-      expires_at: data.expiresAt?.toISOString() || null,
-      is_active: true,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
-
-    const { data: connection, error } = await supabase
-      .from('api_connections')
-      .insert(encryptedData)
-      .select()
-      .single();
-
-    if (error) {
-      console.error('Error creating connection:', error);
-      throw new Error('Failed to create connection');
-    }
+    // Cria nova conexão
+    const newConnection = await prisma.api_connections.create({
+      data: {
+        user_id: data.userId,
+        platform: data.platform,
+        account_id: data.accountId,
+        account_name: data.accountName,
+        access_token: this.encryptToken(data.accessToken),
+        refresh_token: data.refreshToken ? this.encryptToken(data.refreshToken) : null,
+        expires_at: data.expiresAt,
+        is_active: true,
+        created_at: new Date(),
+        updated_at: new Date(),
+      },
+    });
 
     return {
-      id: connection.id,
-      userId: connection.user_id,
-      platform: connection.platform,
-      accountId: connection.account_id,
-      accountName: connection.account_name,
-      accessToken: this.decryptToken(connection.access_token),
-      refreshToken: connection.refresh_token ? this.decryptToken(connection.refresh_token) : null,
-      expiresAt: connection.expires_at ? new Date(connection.expires_at) : null,
-      isActive: connection.is_active,
-      createdAt: new Date(connection.created_at),
-      updatedAt: new Date(connection.updated_at)
+      id: newConnection.id,
+      userId: newConnection.user_id,
+      platform: newConnection.platform,
+      accountId: newConnection.account_id,
+      accountName: newConnection.account_name,
+      accessToken: this.decryptToken(newConnection.access_token),
+      refreshToken: newConnection.refresh_token ? this.decryptToken(newConnection.refresh_token) : null,
+      expiresAt: newConnection.expires_at,
+      isActive: newConnection.is_active,
+      createdAt: newConnection.created_at,
+      updatedAt: newConnection.updated_at,
     };
   }
 
+  // 4. Lista conexões
   static async getConnections(userId: string, platform?: Platform) {
-    let query = supabase
-      .from('api_connections')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('is_active', true)
-      .order('created_at', { ascending: false });
-    
-    if (platform) {
-      query = query.eq('platform', platform);
-    }
+    const connections = await prisma.api_connections.findMany({
+      where: {
+        user_id: userId,
+        is_active: true,
+        ...(platform && { platform }),
+      },
+      orderBy: { created_at: 'desc' },
+    });
 
-    const { data: connections, error } = await query;
-
-    if (error) {
-      console.error('Error fetching connections:', error);
-      throw new Error('Failed to fetch connections');
-    }
-
-    // Descriptografar tokens
-    return (connections || []).map(conn => ({
+    return connections.map(conn => ({
       id: conn.id,
       userId: conn.user_id,
       platform: conn.platform,
@@ -166,29 +124,22 @@ export class SupabaseConnectionService {
       accountName: conn.account_name,
       accessToken: this.decryptToken(conn.access_token),
       refreshToken: conn.refresh_token ? this.decryptToken(conn.refresh_token) : null,
-      expiresAt: conn.expires_at ? new Date(conn.expires_at) : null,
+      expiresAt: conn.expires_at,
       isActive: conn.is_active,
-      createdAt: new Date(conn.created_at),
-      updatedAt: new Date(conn.updated_at)
+      createdAt: conn.created_at,
+      updatedAt: conn.updated_at,
     }));
   }
 
+  // 5. Pega conexão única
   static async getConnection(userId: string, connectionId: string) {
-    const { data: connection, error } = await supabase
-      .from('api_connections')
-      .select('*')
-      .eq('id', connectionId)
-      .eq('user_id', userId)
-      .eq('is_active', true)
-      .single();
-
-    if (error) {
-      if (error.code === 'PGRST116') { // No rows found
-        return null;
-      }
-      console.error('Error fetching connection:', error);
-      throw new Error('Failed to fetch connection');
-    }
+    const connection = await prisma.api_connections.findFirst({
+      where: {
+        id: connectionId,
+        user_id: userId,
+        is_active: true,
+      },
+    });
 
     if (!connection) return null;
 
@@ -200,29 +151,28 @@ export class SupabaseConnectionService {
       accountName: connection.account_name,
       accessToken: this.decryptToken(connection.access_token),
       refreshToken: connection.refresh_token ? this.decryptToken(connection.refresh_token) : null,
-      expiresAt: connection.expires_at ? new Date(connection.expires_at) : null,
+      expiresAt: connection.expires_at,
       isActive: connection.is_active,
-      createdAt: new Date(connection.created_at),
-      updatedAt: new Date(connection.updated_at)
+      createdAt: connection.created_at,
+      updatedAt: connection.updated_at,
     };
   }
 
+  // 6. Deleta (desativa) conexão
   static async deleteConnection(userId: string, connectionId: string): Promise<void> {
-    const { error } = await supabase
-      .from('api_connections')
-      .update({ 
+    await prisma.api_connections.updateMany({
+      where: {
+        id: connectionId,
+        user_id: userId,
+      },
+      data: {
         is_active: false,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', connectionId)
-      .eq('user_id', userId);
-
-    if (error) {
-      console.error('Error deleting connection:', error);
-      throw new Error('Failed to delete connection');
-    }
+        updated_at: new Date(),
+      },
+    });
   }
 
+  // 7. Atualiza conexão
   static async updateConnection(connectionId: string, data: {
     accountName?: string;
     accessToken?: string;
@@ -231,7 +181,7 @@ export class SupabaseConnectionService {
     isActive?: boolean;
   }) {
     const updateData: any = {
-      updated_at: new Date().toISOString()
+      updated_at: new Date(),
     };
 
     if (data.accountName) updateData.account_name = data.accountName;
@@ -240,21 +190,14 @@ export class SupabaseConnectionService {
       updateData.refresh_token = data.refreshToken ? this.encryptToken(data.refreshToken) : null;
     }
     if (data.expiresAt !== undefined) {
-      updateData.expires_at = data.expiresAt?.toISOString() || null;
+      updateData.expires_at = data.expiresAt;
     }
     if (data.isActive !== undefined) updateData.is_active = data.isActive;
 
-    const { data: connection, error } = await supabase
-      .from('api_connections')
-      .update(updateData)
-      .eq('id', connectionId)
-      .select()
-      .single();
-
-    if (error) {
-      console.error('Error updating connection:', error);
-      throw new Error('Failed to update connection');
-    }
+    const connection = await prisma.api_connections.update({
+      where: { id: connectionId },
+      data: updateData,
+    });
 
     return {
       id: connection.id,
@@ -264,23 +207,21 @@ export class SupabaseConnectionService {
       accountName: connection.account_name,
       accessToken: this.decryptToken(connection.access_token),
       refreshToken: connection.refresh_token ? this.decryptToken(connection.refresh_token) : null,
-      expiresAt: connection.expires_at ? new Date(connection.expires_at) : null,
+      expiresAt: connection.expires_at,
       isActive: connection.is_active,
-      createdAt: new Date(connection.created_at),
-      updatedAt: new Date(connection.updated_at)
+      createdAt: connection.created_at,
+      updatedAt: connection.updated_at,
     };
   }
 
+  // 8. Limites por usuário
   static async getConnectionLimits(userId: string) {
-    const { data: user, error } = await supabase
-      .from('app_users')
-      .select('profile')
-      .eq('id', userId)
-      .single();
+    const user = await prisma.app_users.findUnique({
+      where: { id: userId },
+      select: { profile: true },
+    });
 
-    if (error || !user) {
-      throw new Error('User not found');
-    }
+    if (!user) throw new Error('User not found');
 
     const currentConnections = await this.getUserConnectionCount(userId);
     const profile = user.profile as UserProfile;
@@ -290,53 +231,38 @@ export class SupabaseConnectionService {
       current: currentConnections,
       max: maxConnections,
       profile: profile,
-      remaining: maxConnections - currentConnections
+      remaining: maxConnections - currentConnections,
     };
   }
 
-  // Métodos de criptografia simples (em produção usar algo mais robusto)
+  // 9. Criptografia simples (para produção, melhorar)
   private static encryptToken(token: string): string {
-    // Por enquanto, apenas base64 encode
-    // Em produção, usar AES-256 com chave secreta
     return Buffer.from(token).toString('base64');
   }
-
   private static decryptToken(encryptedToken: string): string {
-    // Por enquanto, apenas base64 decode
-    // Em produção, usar AES-256 com chave secreta
     return Buffer.from(encryptedToken, 'base64').toString('utf-8');
   }
 
+  // 10. Valida expiração do token
   static async validateTokenExpiration(connectionId: string): Promise<boolean> {
-    const { data: connection, error } = await supabase
-      .from('api_connections')
-      .select('expires_at')
-      .eq('id', connectionId)
-      .single();
+    const connection = await prisma.api_connections.findUnique({
+      where: { id: connectionId },
+      select: { expires_at: true },
+    });
 
-    if (error || !connection || !connection.expires_at) {
-      return true; // Se não tem data de expiração, consideramos válido
-    }
-
-    return new Date() < new Date(connection.expires_at);
+    if (!connection || !connection.expires_at) return true;
+    return new Date() < connection.expires_at;
   }
 
+  // 11. Busca conexão por conta
   static async getConnectionByAccount(userId: string, platform: Platform, accountId: string) {
-    const { data: connection, error } = await supabase
-      .from('api_connections')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('platform', platform)
-      .eq('account_id', accountId)
-      .single();
-
-    if (error) {
-      if (error.code === 'PGRST116') { // No rows found
-        return null;
-      }
-      console.error('Error fetching connection by account:', error);
-      throw new Error('Failed to fetch connection');
-    }
+    const connection = await prisma.api_connections.findFirst({
+      where: {
+        user_id: userId,
+        platform,
+        account_id: accountId,
+      },
+    });
 
     if (!connection) return null;
 
@@ -348,10 +274,10 @@ export class SupabaseConnectionService {
       accountName: connection.account_name,
       accessToken: this.decryptToken(connection.access_token),
       refreshToken: connection.refresh_token ? this.decryptToken(connection.refresh_token) : null,
-      expiresAt: connection.expires_at ? new Date(connection.expires_at) : null,
+      expiresAt: connection.expires_at,
       isActive: connection.is_active,
-      createdAt: new Date(connection.created_at),
-      updatedAt: new Date(connection.updated_at)
+      createdAt: connection.created_at,
+      updatedAt: connection.updated_at,
     };
   }
 }

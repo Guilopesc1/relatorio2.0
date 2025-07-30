@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
-import { authOptions } from '../auth/[...nextauth]/route'
-import { supabase } from '@/lib/supabase'
+import { authOptions } from '@/lib/auth/config'
+import { PrismaUserService } from '@/lib/services/prisma-user-service'
+import { PrismaConnectionService } from '@/lib/services/prisma-connection-service'
+import { prisma } from '@/lib/prisma'
 
 // Definição dos limites por perfil
 const PROFILE_LIMITS = {
@@ -46,90 +48,132 @@ export async function GET() {
       )
     }
 
-    // Buscar dados do usuário
-    const { data: user, error: userError } = await supabase
-      .from('app_users')
-      .select('id, name, email, profile, created_at')
-      .eq('id', session.user.id)
-      .single()
+    // Buscar dados completos do usuário usando PrismaUserService
+    const userStats = await PrismaUserService.getUserStats(session.user.id)
 
-    if (userError || !user) {
+    if (!userStats) {
       return NextResponse.json(
         { error: 'Usuário não encontrado' },
         { status: 404 }
       )
     }
 
-    // Buscar conexões (usando tabela existente como referência)
-    const { data: connections, error: connectionsError } = await supabase
-      .from('api_connections')
-      .select('id, platform, account_name, is_active, created_at')
-      .eq('user_id', user.id)
-
-    // Buscar relatórios (usando tabela existente como referência)  
-    const { data: reports, error: reportsError } = await supabase
-      .from('app_reports')
-      .select('id, name, is_active, last_run, created_at')
-      .eq('user_id', user.id)
-
-    // Se as tabelas não existirem ainda, usar dados mockados
-    const connectionsData = connectionsError ? [] : (connections || [])
-    const reportsData = reportsError ? [] : (reports || [])
+    // Buscar conexões do usuário
+    const connections = await PrismaConnectionService.getConnections(session.user.id)
+    
+    // Buscar relatórios do usuário
+    const reports = await prisma.report.findMany({
+      where: {
+        userId: session.user.id
+      },
+      select: {
+        id: true,
+        name: true,
+        isActive: true,
+        lastRun: true,
+        createdAt: true
+      },
+      orderBy: {
+        createdAt: 'desc'
+      }
+    })
 
     // Obter limites do perfil
-    const limits = PROFILE_LIMITS[user.profile as keyof typeof PROFILE_LIMITS] || PROFILE_LIMITS.FREE
+    const limits = PROFILE_LIMITS[userStats.user.profile] || PROFILE_LIMITS.FREE
 
     // Calcular estatísticas de uso
-    const activeConnections = connectionsData.filter(c => c.is_active).length
-    const activeReports = reportsData.filter(r => r.is_active).length
-    const maxConnections = limits.connectionsPerPlatform * 3 // 3 plataformas
+    const activeConnections = connections.filter(c => c.isActive).length
+    const activeReports = reports.filter(r => r.isActive).length
+    const maxConnections = limits.connectionsPerPlatform * 3 // 3 plataformas (Facebook, Google, TikTok)
     
     const usage = {
       connections: activeConnections,
       reports: activeReports,
-      connectionsPercentage: Math.round((activeConnections / maxConnections) * 100),
+      connectionsPercentage: maxConnections > 0 ? Math.round((activeConnections / maxConnections) * 100) : 0,
       reportsPercentage: Math.round((activeReports / limits.totalReports) * 100)
     }
 
-    // Atividades recentes (simuladas por enquanto)
-    const recentActivities = [
-      {
-        id: 1,
-        type: 'info',
-        message: `Bem-vindo ao sistema, ${user.name?.split(' ')[0]}!`,
-        time: 'Agora',
-        icon: 'CheckCircle',
-        color: 'text-blue-600'
-      },
-      {
+    // Atividades recentes baseadas nos dados reais
+    const recentActivities = []
+
+    // Adicionar atividade de boas-vindas
+    recentActivities.push({
+      id: 1,
+      type: 'info',
+      message: `Bem-vindo ao sistema, ${userStats.user.name?.split(' ')[0] || 'Usuário'}!`,
+      time: 'Agora',
+      icon: 'CheckCircle',
+      color: 'text-blue-600'
+    })
+
+    // Verificar se há conexões
+    if (activeConnections === 0) {
+      recentActivities.push({
         id: 2,
-        type: 'warning', 
+        type: 'warning',
         message: 'Configure suas primeiras conexões de API',
         time: 'Pendente',
         icon: 'AlertCircle',
         color: 'text-yellow-600'
-      }
-    ]
+      })
+    } else {
+      recentActivities.push({
+        id: 2,
+        type: 'success',
+        message: `${activeConnections} conexão${activeConnections > 1 ? 'ões' : ''} ativa${activeConnections > 1 ? 's' : ''}`,
+        time: 'Ativo',
+        icon: 'CheckCircle',
+        color: 'text-green-600'
+      })
+    }
+
+    // Verificar se há relatórios
+    if (activeReports === 0) {
+      recentActivities.push({
+        id: 3,
+        type: 'info',
+        message: 'Crie seu primeiro relatório automatizado',
+        time: 'Pendente',
+        icon: 'BarChart3',
+        color: 'text-blue-600'
+      })
+    }
+
+    // Verificar se está próximo do limite
+    if (usage.connectionsPercentage > 80) {
+      recentActivities.push({
+        id: 4,
+        type: 'warning',
+        message: `Você está usando ${usage.connectionsPercentage}% do limite de conexões`,
+        time: 'Agora',
+        icon: 'AlertTriangle',
+        color: 'text-orange-600'
+      })
+    }
 
     return NextResponse.json({
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        profile: user.profile,
-        createdAt: user.created_at
-      },
-      connections: connectionsData,
-      reports: reportsData,
+      user: userStats.user,
+      connections: connections.map(conn => ({
+        id: conn.id,
+        platform: conn.platform,
+        accountName: conn.accountName,
+        isActive: conn.isActive,
+        createdAt: conn.createdAt
+      })),
+      reports: reports,
       limits,
       usage,
-      recentActivities
+      stats: userStats.stats,
+      recentActivities: recentActivities.slice(0, 5) // Limitar a 5 atividades
     })
 
   } catch (error) {
     console.error('Erro ao buscar estatísticas:', error)
     return NextResponse.json(
-      { error: 'Erro interno do servidor' },
+      { 
+        error: 'Erro interno do servidor',
+        details: error instanceof Error ? error.message : 'Erro desconhecido'
+      },
       { status: 500 }
     )
   }

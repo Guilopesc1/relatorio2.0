@@ -3,7 +3,7 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '../../../auth/[...nextauth]/route';
 import { GoogleAdsAPIFixed } from '@/lib/integrations/google-ads-fixed';
 import { GoogleDataCollectorFixed } from '@/lib/services/google-data-collector-fixed';
-import { SupabaseConnectionService } from '@/lib/services/supabase-connection-service';
+import { PrismaConnectionService } from '@/lib/services/prisma-connection-service';
 
 export async function POST(request: NextRequest) {
   try {
@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
       case 'campaigns':
         console.log('📋 Fetching campaigns...');
         // Buscar conexão e validar token
-        const connection = await SupabaseConnectionService.getConnection(
+        const connection = await PrismaConnectionService.getConnection(
           session.user.id, 
           connectionId
         );
@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
             const newTokens = await GoogleAdsAPIFixed.refreshAccessToken(connection.refreshToken!);
             accessToken = newTokens.access_token;
             
-            await SupabaseConnectionService.updateConnection(connectionId, {
+            await PrismaConnectionService.updateConnection(connectionId, {
               accessToken: newTokens.access_token,
               expiresAt: new Date(Date.now() + newTokens.expires_in * 1000)
             });
@@ -99,7 +99,7 @@ export async function POST(request: NextRequest) {
         const resourceId = adGroupId || campaignId;
         
         // Similar logic to campaigns case for token validation
-        const metricsConnection = await SupabaseConnectionService.getConnection(
+        const metricsConnection = await PrismaConnectionService.getConnection(
           session.user.id, 
           connectionId
         );
@@ -114,7 +114,7 @@ export async function POST(request: NextRequest) {
             const newTokens = await GoogleAdsAPIFixed.refreshAccessToken(metricsConnection.refreshToken!);
             metricsAccessToken = newTokens.access_token;
             
-            await SupabaseConnectionService.updateConnection(connectionId, {
+            await PrismaConnectionService.updateConnection(connectionId, {
               accessToken: newTokens.access_token,
               expiresAt: new Date(Date.now() + newTokens.expires_in * 1000)
             });

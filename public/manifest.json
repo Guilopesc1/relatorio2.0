@@ -1,7 +1,7 @@
 {
-  "name": "Relatórios de Anúncios",
-  "short_name": "Relatórios",
-  "description": "PWA para geração automática de relatórios de campanhas publicitárias",
+  "name": "Em produção",
+    "short_name": "Relatórios",
+  "description": "PWA",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",

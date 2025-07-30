@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '../../../auth/[...nextauth]/route';
 import { createGoogleConnectionStandard } from '../../../../../lib/integrations/google-ads-standard';
-import { SupabaseConnectionService } from '../../../../../lib/services/supabase-connection-service';
+import { PrismaConnectionService } from '../../../../../lib/services/prisma-connection-service';
 
 export async function POST(request: NextRequest) {
   try {
@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
       // Verificar se já existe uma conexão para esta conta
       console.log('Checking for existing connection...');
       
-      const existingConnection = await SupabaseConnectionService.getConnectionByAccount(
+      const existingConnection = await PrismaConnectionService.getConnectionByAccount(
         session.user.id,
         'GOOGLE',
         customerId
@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
         console.log('Connection already exists, updating...');
         
         // Atualizar a conexão existente
-        const updatedConnection = await SupabaseConnectionService.updateConnection(
+        const updatedConnection = await PrismaConnectionService.updateConnection(
           existingConnection.id,
           {
             accountName: accountName || existingConnection.accountName,
@@ -90,8 +90,8 @@ export async function POST(request: NextRequest) {
         accountName: connectionData.accountName
       });
 
-      // Salvar no banco via Supabase
-      const savedConnection = await SupabaseConnectionService.createConnection(connectionData);
+      // Salvar no banco via Prisma
+      const savedConnection = await PrismaConnectionService.createConnection(connectionData);
 
       console.log('Connection saved successfully:', savedConnection.id);
 

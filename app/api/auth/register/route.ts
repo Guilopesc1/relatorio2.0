@@ -1,71 +1,108 @@
-import { NextRequest, NextResponse } from 'next/server'
-import bcrypt from 'bcryptjs'
-import { supabase } from '@/lib/supabase'
+import { NextRequest, NextResponse } from 'next/server';
+import { PrismaUserService } from '@/lib/services/prisma-user-service';
 
 export async function POST(request: NextRequest) {
   try {
-    const { name, email, password } = await request.json()
+    const body = await request.json();
+    const { name, email, password, profile } = body;
 
+    // Validações básicas
     if (!name || !email || !password) {
       return NextResponse.json(
-        { error: 'Todos os campos são obrigatórios' },
+        { error: 'Name, email and password are required' },
         { status: 400 }
-      )
+      );
     }
 
     if (password.length < 6) {
       return NextResponse.json(
-        { error: 'A senha deve ter pelo menos 6 caracteres' },
+        { error: 'Password must be at least 6 characters long' },
         { status: 400 }
-      )
+      );
     }
 
-    // Verificar se usuário já existe
-    const { data: existingUser } = await supabase
-      .from('app_users')
-      .select('id')
-      .eq('email', email)
-      .single()
-
-    if (existingUser) {
+    // Validar formato do email
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
       return NextResponse.json(
-        { error: 'Usuário já existe com este email' },
+        { error: 'Invalid email format' },
         { status: 400 }
-      )
+      );
     }
 
-    // Hash da senha
-    const hashedPassword = await bcrypt.hash(password, 12)
-
-    // Criar usuário no Supabase
-    const { data, error } = await supabase
-      .from('app_users')
-      .insert({
-        name,
-        email,
-        password: hashedPassword
-      })
-      .select('id, name, email, profile, created_at')
-      .single()
-
-    if (error) {
-      console.error('Erro do Supabase:', error)
-      return NextResponse.json(
-        { error: 'Erro ao criar usuário no banco de dados: ' + error.message },
-        { status: 500 }
-      )
-    }
+    // Criar usuário usando Prisma
+    const user = await PrismaUserService.createUser({
+      name: name.trim(),
+      email: email.toLowerCase().trim(),
+      password,
+      profile: profile || 'FREE'
+    });
 
     return NextResponse.json({
-      message: 'Usuário criado com sucesso!',
-      user: data
-    })
+      success: true,
+      data: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        profile: user.profile
+      },
+      message: 'User created successfully'
+    });
 
   } catch (error) {
-    console.error('Erro ao criar usuário:', error)
+    console.error('Register error:', error);
+    
+    if (error instanceof Error) {
+      if (error.message.includes('Email already registered')) {
+        return NextResponse.json(
+          { error: 'Email is already registered' },
+          { status: 409 }
+        );
+      }
+      
+      if (error.message.includes('Unique constraint')) {
+        return NextResponse.json(
+          { error: 'Email is already in use' },
+          { status: 409 }
+        );
+      }
+    }
+
     return NextResponse.json(
-      { error: 'Erro interno do servidor' },
+      { error: 'Internal server error' },
       { status: 500 }
-    )
+    );
+  }
+}
+
+// Endpoint para verificar se email já existe (útil para validação em tempo real)
+export async function GET(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const email = searchParams.get('email');
+
+    if (!email) {
+      return NextResponse.json(
+        { error: 'Email parameter is required' },
+        { status: 400 }
+      );
+    }
+
+    const existingUser = await PrismaUserService.getUserByEmail(email.toLowerCase().trim());
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        exists: !!existingUser,
+        available: !existingUser
+      }
+    });
+
+  } catch (error) {
+    console.error('Check email error:', error);
+    return NextResponse.json(
+      { error: 'Failed to check email availability' },
+      { status: 500 }
+    );
   }
 }
